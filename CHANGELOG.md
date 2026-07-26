@@ -4,6 +4,14 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.1.0] - 2026-07-26
+
+### Hinzugefügt
+- **Little-Planet-Ansicht** 🪐 (stereografische Projektion) — Umschalter + Taste `P`; ziehen = drehen, scrollen = zoom
+- **Galerie** 🗂️ — mehrere Fotos gleichzeitig laden (Mehrfachauswahl oder Drag&Drop), Thumbnail-Leiste, Klick zum Wechseln
+- **Serien-Export** 🎞️ — aus einem Video alle N Sekunden ein volles 360°-Frame, gebündelt als ZIP (eingebauter Store-ZIP-Writer, keine Abhängigkeiten)
+- GitHub Pages Einstiegsseite (`index.html`)
+
 ## [1.0.0] - 2026-07-26
 
 ### Hinzugefügt

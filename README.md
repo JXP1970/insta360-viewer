@@ -4,6 +4,8 @@ Ein **eigenständiger 360°-Betrachter** für Insta360-Aufnahmen (X4 & Co.) — 
 
 > Standalone WebGL 360° photo/video viewer for Insta360 cameras. One self-contained HTML file — runs fully offline, your media never leaves your machine.
 
+**▶ Live:** https://jxp1970.github.io/insta360-viewer/ (Foto per Drag&Drop laden — nichts wird hochgeladen, alles läuft im Browser)
+
 ## Funktionen
 
 - 🖼️ **360°-Fotos** anzeigen — equirectangular **und** rohes Dual-Fisheye (`.insp`)
@@ -14,6 +16,9 @@ Ein **eigenständiger 360°-Betrachter** für Insta360-Aufnahmen (X4 & Co.) — 
   - *Ansicht* — der aktuelle Blick als flaches PNG
   - *Volles 360°-Frame* — komplettes Panorama; bei Dual-Fisheye wird zu **equirectangular gestitcht**
 - 🐟 **Dual-Fisheye-Regler** (FOV / hinten drehen / Objektive tauschen) + **X4-Preset**
+- 🪐 **Little-Planet-Ansicht** (stereografisch) — Taste `P`
+- 🗂️ **Galerie** — mehrere Fotos laden, Thumbnails, Klick zum Wechseln
+- 🎞️ **Serien-Export** — aus Video alle N Sekunden ein 360°-Frame, als ZIP
 - ✨ Eingebaute **Demos** zum Ausprobieren ohne eigene Dateien
 - 🔗 **Direkt-Öffnen** per URL-Parameter: `360-viewer.html?src=foto.jpg`
 

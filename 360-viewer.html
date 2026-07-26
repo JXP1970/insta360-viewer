@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  360° Viewer v1.0.0
+  360° Viewer v1.1.0
   Standalone WebGL 360° photo/video viewer for Insta360 (equirectangular + dual-fisheye).
   Single self-contained HTML file. Runs fully offline — files never leave your machine.
   https://github.com/JXP1970/insta360-viewer  ·  MIT License
@@ -30,6 +30,7 @@
     display:inline-flex;align-items:center;gap:6px}
   button:hover:not(:disabled){border-color:var(--accent);background:#222b3a}
   button:disabled{opacity:.4;cursor:not-allowed}
+  button.active{background:#3b2f6b;border-color:#8b7fd6;color:#fff}
   button.save{background:#14532d;border-color:#166534}
   button.save:hover:not(:disabled){background:#166534;border-color:var(--good)}
   select{background:var(--panel2);color:var(--text);border:1px solid var(--border);
@@ -73,12 +74,32 @@
     border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;
     color:var(--muted);font-variant-numeric:tabular-nums}
   .sep{width:1px;height:22px;background:var(--border);margin:0 2px}
+
+  #gallery{position:absolute;left:0;right:0;bottom:0;display:none;gap:8px;padding:8px 10px;
+    background:linear-gradient(to top,rgba(13,17,23,.95),rgba(13,17,23,0));
+    overflow-x:auto;white-space:nowrap;align-items:center;z-index:15}
+  #gallery.show{display:flex}
+  #gallery .thumb{position:relative;flex:0 0 auto;width:104px;height:58px;border-radius:6px;
+    overflow:hidden;border:2px solid transparent;cursor:pointer;background:#000}
+  #gallery .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  #gallery .thumb.active{border-color:var(--accent)}
+  #gallery .thumb .badge{position:absolute;left:3px;top:2px;font-size:10px;
+    background:rgba(0,0,0,.65);padding:0 4px;border-radius:4px;color:#fff}
+  #seriesbar{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:30;
+    background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px 22px;
+    display:none;flex-direction:column;gap:12px;min-width:280px;box-shadow:0 12px 50px rgba(0,0,0,.6)}
+  #seriesbar.show{display:flex}
+  #seriesbar h3{margin:0;font-size:15px}
+  #seriesbar .row{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+  #seriesbar .prog{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;display:none}
+  #seriesbar .prog.show{display:block}
+  #seriesbar .prog>div{height:100%;width:0;background:var(--accent);transition:width .15s}
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <span class="title">360° Viewer <small>v1.0.0 · Insta360 · equirect · Dual-Fisheye</small></span>
+    <span class="title">360° Viewer <small>v1.1.0 · Insta360 · equirect · Dual-Fisheye</small></span>
     <button id="btnImage">🖼️ Foto</button>
     <button id="btnVideo">🎬 Video</button>
     <button id="btnDemo">✨ Demo</button>
@@ -103,11 +124,14 @@
       <button id="btnX4" title="Insta360 X4 Standardwerte">X4-Preset</button>
     </div>
 
+    <button id="btnPlanet" title="Little-Planet-Ansicht umschalten">🪐 Little Planet</button>
+    <button id="btnGallery" title="Galerie ein/aus" disabled>🗂️ Galerie</button>
     <div class="spacer"></div>
     <button id="btnSaveView" class="save" disabled>📸 Ansicht</button>
     <button id="btnSaveFull" class="save" disabled>🗺️ Volles 360°-Frame</button>
+    <button id="btnSeries" class="save" title="Serie von Einzelbildern aus dem Video (ZIP)" disabled>🎞️ Serie</button>
     <div class="sep"></div>
-    <button id="btnReset" title="Blickrichtung zurücksetzen">⟲</button>
+    <button id="btnReset" title="Ansicht zurücksetzen">⟲</button>
     <button id="btnFull" title="Vollbild">⛶</button>
   </header>
 
@@ -124,6 +148,17 @@
     </div>
     <div id="fovtag"></div>
     <div id="toast"></div>
+    <div id="gallery"></div>
+    <div id="seriesbar">
+      <h3>🎞️ Serie exportieren</h3>
+      <div class="row">Alle <input id="seriesStep" type="number" min="0.2" max="60" step="0.2" value="2" style="width:64px"> Sekunden ein volles 360°-Frame</div>
+      <div class="row"><span id="seriesInfo"></span></div>
+      <div class="prog" id="seriesProg"><div></div></div>
+      <div class="row" style="justify-content:flex-end">
+        <button id="seriesCancel">Abbrechen</button>
+        <button id="seriesStart" class="save">Start (ZIP)</button>
+      </div>
+    </div>
   </div>
 
   <div id="videobar">
@@ -135,7 +170,7 @@
   </div>
 </div>
 
-<input id="fileImage" type="file" accept="image/*,.insp" hidden>
+<input id="fileImage" type="file" accept="image/*,.insp" multiple hidden>
 <input id="fileVideo" type="file" accept="video/*,.insv" hidden>
 
 <script>
@@ -182,14 +217,28 @@
 
   const FRAG = `precision highp float;
     uniform vec2 uRes; uniform float uYaw, uPitch, uFov;
+    uniform int uViewMode;      // 0 = perspective, 1 = little planet, 2 = tunnel (up)
+    uniform float uPlanetScale; // little-planet zoom
     ${COMMON}
     mat3 rotY(float a){ float c=cos(a),s=sin(a); return mat3(c,0.,-s, 0.,1.,0., s,0.,c); }
     mat3 rotX(float a){ float c=cos(a),s=sin(a); return mat3(1.,0.,0., 0.,c,s, 0.,-s,c); }
     void main(){
       vec2 uv=(gl_FragCoord.xy/uRes)*2.-1.;
-      float aspect=uRes.x/uRes.y, t=tan(uFov*0.5);
-      vec3 dir=normalize(vec3(uv.x*t*aspect, uv.y*t, -1.));
-      dir=rotY(uYaw)*rotX(uPitch)*dir;
+      float aspect=uRes.x/uRes.y;
+      vec3 dir;
+      if(uViewMode==0){
+        float t=tan(uFov*0.5);
+        dir=normalize(vec3(uv.x*t*aspect, uv.y*t, -1.));
+        dir=rotY(uYaw)*rotX(uPitch)*dir;
+      } else {
+        // stereographic "little planet": center = nadir (down), edge wraps to sky
+        vec2 p=vec2(uv.x*aspect, uv.y)*uPlanetScale;
+        float R=length(p);
+        float phi=2.0*atan(R);                 // 0 at center (down) .. PI at sky
+        float psi=atan(p.y,p.x)+uYaw;           // azimuth + spin
+        float down=(uViewMode==2)?-1.0:1.0;     // mode 2 flips to look up (tunnel)
+        dir=vec3(sin(phi)*cos(psi), -down*cos(phi), sin(phi)*sin(psi));
+      }
       gl_FragColor=sample360(dir);
     }`;
 
@@ -237,7 +286,8 @@
     uFov:gl.getUniformLocation(p,'uFov'), uTex:gl.getUniformLocation(p,'uTex'),
     uMode:gl.getUniformLocation(p,'uMode'), uFishHalf:gl.getUniformLocation(p,'uFishHalf'),
     uImgAspect:gl.getUniformLocation(p,'uImgAspect'),
-    uSwap:gl.getUniformLocation(p,'uSwap'), uBackRot:gl.getUniformLocation(p,'uBackRot')
+    uSwap:gl.getUniformLocation(p,'uSwap'), uBackRot:gl.getUniformLocation(p,'uBackRot'),
+    uViewMode:gl.getUniformLocation(p,'uViewMode'), uPlanetScale:gl.getUniformLocation(p,'uPlanetScale')
   });
   const uv=U(prog), ue=U(progE);
 
@@ -253,6 +303,7 @@
   /* ================= State ================= */
   const state={ yaw:0,pitch:0,fov:75*Math.PI/180, mode:'none', proj:'auto', autoMode:0,
     fishHalf:(200*Math.PI/180)/2, swap:0, backRot:0, imgAspect:2, videoEl:null, imageEl:null,
+    viewMode:0, planetScale:1.0, gallery:[], galleryIdx:-1,
     dragging:false,lastX:0,lastY:0 };
   const FOV_MIN=25*Math.PI/180, FOV_MAX=110*Math.PI/180;
 
@@ -284,6 +335,8 @@
     gl.uniform1f(uv.uImgAspect,state.imgAspect);
     gl.uniform1i(uv.uSwap,state.swap);
     gl.uniform1f(uv.uBackRot,state.backRot);
+    gl.uniform1i(uv.uViewMode,state.viewMode);
+    gl.uniform1f(uv.uPlanetScale,state.planetScale);
     drawFS(prog);
     updateFovTag();
     requestAnimationFrame(render);
@@ -292,8 +345,10 @@
 
   function updateFovTag(){
     const m=effMode()===1?'Fisheye':'Equirect';
-    document.getElementById('fovtag').textContent=
-      `${m}  ·  FOV ${Math.round(state.fov*180/Math.PI)}°  ·  Yaw ${Math.round(((state.yaw*180/Math.PI)%360+360)%360)}°  ·  Pitch ${Math.round(state.pitch*180/Math.PI)}°`;
+    const yaw=Math.round(((state.yaw*180/Math.PI)%360+360)%360);
+    document.getElementById('fovtag').textContent = state.viewMode!==0
+      ? `🪐 Little Planet · ${m} · Zoom ${state.planetScale.toFixed(2)} · Spin ${yaw}°`
+      : `${m}  ·  FOV ${Math.round(state.fov*180/Math.PI)}°  ·  Yaw ${yaw}°  ·  Pitch ${Math.round(state.pitch*180/Math.PI)}°`;
     document.getElementById('fishCtl').classList.toggle('hidden', effMode()!==1);
   }
 
@@ -303,11 +358,13 @@
   window.addEventListener('mousemove',e=>{
     if(!state.dragging)return;
     const dx=e.clientX-state.lastX,dy=e.clientY-state.lastY; state.lastX=e.clientX; state.lastY=e.clientY;
+    if(state.viewMode!==0){ state.yaw-=dx*0.005; return; } // little planet: drag = spin
     const sp=state.fov/canvas.clientHeight*dpr;
     state.yaw-=dx*sp; state.pitch+=dy*sp;
     const lim=Math.PI/2-0.01; state.pitch=Math.max(-lim,Math.min(lim,state.pitch));
   });
   canvas.addEventListener('wheel',e=>{e.preventDefault();
+    if(state.viewMode!==0){ state.planetScale*=(1+Math.sign(e.deltaY)*0.08); state.planetScale=Math.max(0.3,Math.min(4,state.planetScale)); return; }
     state.fov*=(1+Math.sign(e.deltaY)*0.06); state.fov=Math.max(FOV_MIN,Math.min(FOV_MAX,state.fov));
   },{passive:false});
   let pinch=0;
@@ -345,6 +402,7 @@
     stage.classList.add('hasmedia');
     document.getElementById('btnSaveView').disabled=false;
     document.getElementById('btnSaveFull').disabled=false;
+    document.getElementById('btnSeries').disabled = state.mode!=='video';
     if(state.proj==='auto') toast(msg+' · erkannt: '+(effMode()===1?'Dual-Fisheye':'Equirectangular'));
     else toast(msg);
   }
@@ -397,25 +455,17 @@
   document.getElementById('btnSaveView').onclick=()=>{
     canvas.toBlob(b=>{download(b,nameFor('ansicht'));toast('Ansicht gespeichert 📸',true);},'image/png');
   };
-  // Full 360 frame: if fisheye source -> stitch to equirectangular; if equirect -> raw copy
   document.getElementById('btnSaveFull').onclick=()=>{
-    if(effMode()===1){ exportEquirect(); return; }
-    const srcEl = state.mode==='video'?state.videoEl : state.imageEl;
-    const w = state.mode==='video'?state.videoEl.videoWidth:state.imageEl.naturalWidth;
-    const h = state.mode==='video'?state.videoEl.videoHeight:state.imageEl.naturalHeight;
-    if(!srcEl){toast('Keine Quelle');return;}
-    const c=document.createElement('canvas');c.width=w;c.height=h;
-    c.getContext('2d').drawImage(srcEl,0,0,w,h);
-    c.toBlob(b=>{download(b,nameFor('360frame'));toast('Volles 360°-Frame gespeichert 🗺️',true);},'image/png');
+    const c=captureFullFrameCanvas(4096); if(!c){toast('Keine Quelle',false,'warn');return;}
+    c.toBlob(b=>{download(b,nameFor(effMode()===1?'equirect_stitch':'360frame'));
+      toast('Volles 360°-Frame gespeichert 🗺️ ('+c.width+'×'+c.height+')',true);},'image/png');
   };
 
-  function exportEquirect(){
-    const srcW = state.mode==='video'?state.videoEl.videoWidth:state.imageEl.naturalWidth;
-    const EW=Math.min(4096, Math.max(2048, Math.round(srcW))); const EH=EW/2;
-    // upload current source into texture (video may need refresh)
+  // Render current source into an equirectangular canvas (fisheye -> stitched). Returns canvas or null.
+  function renderEquirectToCanvas(EW){
+    EW=EW-(EW%2); const EH=EW/2;
     gl.bindTexture(gl.TEXTURE_2D,tex);
     if(state.mode==='video') gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,state.videoEl);
-    // offscreen target
     const outTex=gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D,outTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
@@ -427,29 +477,110 @@
     const fbo=gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,outTex,0);
-    if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE){toast('Export fehlgeschlagen (FBO)',false,'warn');gl.bindFramebuffer(gl.FRAMEBUFFER,null);return;}
+    if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);return null;}
     gl.useProgram(progE);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
     gl.viewport(0,0,EW,EH);
-    gl.uniform2f(ue.uOutRes,EW,EH);
-    gl.uniform1i(ue.uTex,0);
-    gl.uniform1i(ue.uMode,1);
-    gl.uniform1f(ue.uFishHalf,state.fishHalf);
-    gl.uniform1f(ue.uImgAspect,state.imgAspect);
-    gl.uniform1i(ue.uSwap,state.swap);
-    gl.uniform1f(ue.uBackRot,state.backRot);
+    gl.uniform2f(ue.uOutRes,EW,EH); gl.uniform1i(ue.uTex,0); gl.uniform1i(ue.uMode,1);
+    gl.uniform1f(ue.uFishHalf,state.fishHalf); gl.uniform1f(ue.uImgAspect,state.imgAspect);
+    gl.uniform1i(ue.uSwap,state.swap); gl.uniform1f(ue.uBackRot,state.backRot);
     drawFS(progE);
     const pix=new Uint8Array(EW*EH*4);
     gl.readPixels(0,0,EW,EH,gl.RGBA,gl.UNSIGNED_BYTE,pix);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     gl.deleteFramebuffer(fbo); gl.deleteTexture(outTex);
     gl.bindTexture(gl.TEXTURE_2D,tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
-    // to canvas (flip rows: readPixels is bottom-up)
     const c=document.createElement('canvas'); c.width=EW; c.height=EH;
-    const cx=c.getContext('2d'); const id=cx.createImageData(EW,EH);
-    for(let y=0;y<EH;y++){ const s=(EH-1-y)*EW*4, dstart=y*EW*4; id.data.set(pix.subarray(s,s+EW*4),dstart); }
-    cx.putImageData(id,0,0);
-    c.toBlob(b=>{download(b,nameFor('equirect_stitch'));toast('Als equirectangular gestitcht & gespeichert 🧩 ('+EW+'×'+EH+')',true);},'image/png');
+    const ctx=c.getContext('2d'); const id=ctx.createImageData(EW,EH);
+    for(let y=0;y<EH;y++){ const s=(EH-1-y)*EW*4; id.data.set(pix.subarray(s,s+EW*4), y*EW*4); }
+    ctx.putImageData(id,0,0);
+    return c;
+  }
+  // Full equirectangular 360° frame as a canvas; maxW caps width.
+  function captureFullFrameCanvas(maxW){
+    if(state.mode==='none') return null;
+    if(effMode()===1){
+      const srcW = state.mode==='video'?state.videoEl.videoWidth:state.imageEl.naturalWidth;
+      return renderEquirectToCanvas(Math.min(maxW, Math.max(1024, srcW||2048)));
+    }
+    const srcEl = state.mode==='video'?state.videoEl:state.imageEl;
+    const w = state.mode==='video'?state.videoEl.videoWidth:state.imageEl.naturalWidth;
+    const h = state.mode==='video'?state.videoEl.videoHeight:state.imageEl.naturalHeight;
+    if(!srcEl) return null;
+    let W=w,H=h; if(maxW && w>maxW){ W=maxW; H=Math.round(h*maxW/w); }
+    const c=document.createElement('canvas'); c.width=W; c.height=H;
+    c.getContext('2d').drawImage(srcEl,0,0,W,H);
+    return c;
+  }
+
+  /* ================= Series export (video -> frames as ZIP) ================= */
+  const seriesbar=document.getElementById('seriesbar');
+  let seriesAbort=false;
+  function seriesInfo(){
+    const v=state.videoEl; if(!v) return;
+    const step=Math.max(0.2,+document.getElementById('seriesStep').value||2);
+    const n=Math.floor((v.duration||0)/step)+1;
+    document.getElementById('seriesInfo').textContent=`Video ${fmt(v.duration)} → ca. ${n} Bilder (alle ${step}s)`;
+  }
+  document.getElementById('btnSeries').onclick=()=>{
+    if(state.mode!=='video'){ toast('Serie geht nur bei Video',false,'warn'); return; }
+    seriesInfo(); seriesbar.classList.add('show');
+  };
+  document.getElementById('seriesStep').oninput=seriesInfo;
+  document.getElementById('seriesCancel').onclick=()=>{ seriesAbort=true; seriesbar.classList.remove('show'); };
+  document.getElementById('seriesStart').onclick=()=>runSeries();
+
+  function seekTo(v,t){ return new Promise(res=>{ const h=()=>{v.removeEventListener('seeked',h);res();}; v.addEventListener('seeked',h); v.currentTime=Math.max(0,Math.min(t,(v.duration||0)-0.001)); }); }
+
+  async function runSeries(){
+    const v=state.videoEl; if(!v){return;}
+    const step=Math.max(0.2,+document.getElementById('seriesStep').value||2);
+    const dur=v.duration||0, total=Math.floor(dur/step)+1;
+    const wasPlaying=!v.paused; v.pause(); seriesAbort=false;
+    const prog=document.getElementById('seriesProg'), bar=prog.firstElementChild;
+    const startBtn=document.getElementById('seriesStart'); startBtn.disabled=true; prog.classList.add('show');
+    const files=[];
+    try{
+      let i=0;
+      for(let t=0; t<=dur+1e-3 && !seriesAbort; t+=step, i++){
+        await seekTo(v,t);
+        await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+        const c=captureFullFrameCanvas(2048); if(!c) break;
+        const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+        files.push({name:`frame_${String(i+1).padStart(4,'0')}_${fmt(t).replace(':','m')}s.png`, data:new Uint8Array(await blob.arrayBuffer())});
+        document.getElementById('seriesInfo').textContent=`Bild ${i+1}/${total} …`;
+        bar.style.width=Math.min(100,Math.round((i+1)/total*100))+'%';
+      }
+      if(seriesAbort) toast('Serie abgebrochen');
+      else if(files.length){
+        download(new Blob([makeZip(files)],{type:'application/zip'}), `360_serie_${files.length}bilder_${Date.now()}.zip`);
+        toast('Serie exportiert 🎞️ · '+files.length+' Bilder im ZIP',true);
+      }
+    }catch(e){ toast('Serie-Fehler: '+e.message,false,'warn'); }
+    finally{
+      prog.classList.remove('show'); bar.style.width='0'; startBtn.disabled=false;
+      seriesbar.classList.remove('show'); if(wasPlaying) v.play();
+    }
+  }
+
+  /* ---- minimal ZIP writer (store / no compression) ---- */
+  const CRC_TABLE=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+  function crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=CRC_TABLE[(c^u8[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+  function makeZip(files){
+    const enc=new TextEncoder(); const u16=v=>[v&255,(v>>8)&255]; const u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255];
+    const parts=[], central=[]; let offset=0;
+    for(const f of files){
+      const name=enc.encode(f.name), data=f.data, crc=crc32(data);
+      const lh=new Uint8Array([].concat(u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0)));
+      parts.push(lh,name,data);
+      central.push(new Uint8Array([].concat(u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset))), name);
+      offset+=lh.length+name.length+data.length;
+    }
+    let cdSize=0; central.forEach(c=>cdSize+=c.length);
+    const end=new Uint8Array([].concat(u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),u32(cdSize),u32(offset),u16(0)));
+    const all=parts.concat(central,[end]); let size=0; all.forEach(a=>size+=a.length);
+    const out=new Uint8Array(size); let p=0; all.forEach(a=>{out.set(a,p);p+=a.length;});
+    return out;
   }
 
   function nameFor(kind){
@@ -462,9 +593,42 @@
   const fileImage=document.getElementById('fileImage'), fileVideo=document.getElementById('fileVideo');
   document.getElementById('btnImage').onclick=()=>fileImage.click();
   document.getElementById('btnVideo').onclick=()=>fileVideo.click();
-  fileImage.onchange=()=>{const f=fileImage.files[0];if(f)openFile(f,'image');};
+  fileImage.onchange=()=>{const fs=[...fileImage.files];if(!fs.length)return; if(fs.length>1) buildGallery(fs); else openFile(fs[0],'image');};
   fileVideo.onchange=()=>{const f=fileVideo.files[0];if(f)openFile(f,'video');};
-  document.getElementById('btnReset').onclick=()=>{state.yaw=0;state.pitch=0;state.fov=75*Math.PI/180;};
+  document.getElementById('btnReset').onclick=()=>{state.yaw=0;state.pitch=0;state.fov=75*Math.PI/180;state.planetScale=1.0;};
+
+  /* Little Planet toggle */
+  const btnPlanet=document.getElementById('btnPlanet');
+  btnPlanet.onclick=()=>{
+    state.viewMode = state.viewMode===0 ? 1 : 0;
+    btnPlanet.classList.toggle('active', state.viewMode!==0);
+    if(state.viewMode!==0){ state.yaw=0; state.planetScale=1.5; }
+    toast(state.viewMode!==0 ? 'Little Planet 🪐 · ziehen = drehen, scrollen = zoom' : 'Normale Ansicht');
+  };
+
+  /* Gallery */
+  const galleryEl=document.getElementById('gallery');
+  function buildGallery(files){
+    state.gallery=files.slice(); galleryEl.innerHTML='';
+    files.forEach((f,i)=>{
+      const t=document.createElement('div'); t.className='thumb'; t.title=f.name;
+      const img=document.createElement('img'); img.src=URL.createObjectURL(f); t.appendChild(img);
+      const b=document.createElement('div'); b.className='badge'; b.textContent=String(i+1); t.appendChild(b);
+      t.onclick=()=>galleryLoad(i);
+      galleryEl.appendChild(t);
+    });
+    document.getElementById('btnGallery').disabled=false;
+    galleryEl.classList.add('show');
+    galleryLoad(0);
+    toast(files.length+' Fotos in Galerie geladen 🗂️');
+  }
+  function galleryLoad(i){
+    if(i<0||i>=state.gallery.length) return;
+    state.galleryIdx=i;
+    [...galleryEl.children].forEach((c,j)=>c.classList.toggle('active',j===i));
+    openFile(state.gallery[i]);
+  }
+  document.getElementById('btnGallery').onclick=()=>galleryEl.classList.toggle('show');
   document.getElementById('btnFull').onclick=()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();else document.exitFullscreen&&document.exitFullscreen();};
   document.getElementById('btnDemo').onclick=()=>{state.proj='auto';document.getElementById('proj').value='auto';loadImageSource(makeDemoEqui());};
   document.getElementById('btnDemoFish').onclick=()=>{
@@ -499,7 +663,11 @@
   /* drag & drop */
   ['dragenter','dragover'].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();stage.classList.add('dragover');}));
   ['dragleave','drop'].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();if(ev==='dragleave'&&e.target!==stage)return;stage.classList.remove('dragover');}));
-  stage.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)openFile(f);});
+  stage.addEventListener('drop',e=>{
+    const fs=[...e.dataTransfer.files]; if(!fs.length) return;
+    const imgs=fs.filter(f=>f.type.startsWith('image')||/\.insp$/i.test(f.name));
+    if(imgs.length>1) buildGallery(imgs); else openFile(fs[0]);
+  });
 
   /* keyboard */
   window.addEventListener('keydown',e=>{
@@ -508,6 +676,7 @@
     else if(e.code==='ArrowRight'){if(state.mode==='video'){e.preventDefault();stepFrame(1);}else state.yaw+=0.05;}
     else if(e.key==='s'||e.key==='S'){if(!document.getElementById('btnSaveView').disabled)document.getElementById('btnSaveView').click();}
     else if(e.key==='f'||e.key==='F'){document.getElementById('btnFull').click();}
+    else if(e.key==='p'||e.key==='P'){document.getElementById('btnPlanet').click();}
   });
 
   /* toast */
