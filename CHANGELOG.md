@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.4.1] - 2026-07-26
+
+### Geändert
+- **Nadir füllen** deutlich verbessert: saubere **einfarbige Abdeckung mit weichem Übergang** (Standard) statt des unruhigen radialen „Sunburst"; „Verwischen" bleibt als Option (Häkchen „einfarbig" abwählen). Abdeckungsbereich auf bis zu 75° erweitert für große Löcher.
+
 ## [1.4.0] - 2026-07-26
 
 ### Hinzugefügt

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  360° Viewer v1.4.0
+  360° Viewer v1.4.1
   Standalone WebGL 360° photo/video viewer for Insta360 (equirectangular + dual-fisheye).
   Single self-contained HTML file. Runs fully offline — files never leave your machine.
   https://github.com/JXP1970/insta360-viewer  ·  MIT License
@@ -99,7 +99,7 @@
 <body>
 <div id="app">
   <header>
-    <span class="title">360° Viewer <small>v1.4.0 · Insta360 · equirect · Dual-Fisheye</small></span>
+    <span class="title">360° Viewer <small>v1.4.1 · Insta360 · equirect · Dual-Fisheye</small></span>
     <button id="btnImage">🖼️ Foto</button>
     <button id="btnVideo">🎬 Video</button>
     <button id="btnDemo">✨ Demo</button>
@@ -138,7 +138,8 @@
     </div>
     <div class="ctl">
       <label style="display:flex;align-items:center;gap:4px" title="Schwarzes Loch unter der Kamera überdecken"><input id="nadir" type="checkbox"> Nadir füllen</label>
-      <input id="nadirC" type="range" min="5" max="45" value="20" step="1" style="width:76px"><span id="nadirVal">20°</span>
+      <input id="nadirC" type="range" min="5" max="75" value="30" step="1" style="width:76px"><span id="nadirVal">30°</span>
+      <label style="display:flex;align-items:center;gap:4px" title="Saubere einfarbige Abdeckung statt Verwischen"><input id="nadirSolid" type="checkbox" checked> einfarbig</label>
     </div>
     <button id="btnSaveView" class="save" disabled>📸 Ansicht</button>
     <button id="btnSaveFull" class="save" disabled>🗺️ Volles 360°-Frame</button>
@@ -215,13 +216,13 @@
     uniform float uImgAspect;  // source width/height
     uniform int   uSwap;       // 1 = swap which half is front/back
     uniform float uBackRot;    // extra rotation of back lens (radians)
-    uniform float uNadirFill;  // >0: clamp latitude to -uNadirFill (smears last ring over the black nadir hole)
+    uniform float uNadirFill;  // >0: fill nadir hole below latitude -uNadirFill (radians)
+    uniform int   uNadirSolid; // 1 = clean solid colour disc, 0 = radial smear
     const float PI = 3.14159265358979;
 
     vec2 equirectUV(vec3 d){
       float lon = atan(d.x, -d.z);
       float lat = asin(clamp(d.y,-1.,1.));
-      if(uNadirFill > 0.0) lat = max(lat, -uNadirFill);
       return vec2(0.5 + lon/(2.*PI), 0.5 + lat/PI);
     }
     vec2 fisheyeUV(vec3 d){
@@ -236,8 +237,20 @@
       return vec2(cx + disc.x / uImgAspect, 0.5 + disc.y);
     }
     vec4 sample360(vec3 d){
-      vec2 uv = (uMode==0) ? equirectUV(d) : fisheyeUV(d);
-      return texture2D(uTex, uv);
+      if(uMode==1) return texture2D(uTex, fisheyeUV(d));
+      float lat = asin(clamp(d.y,-1.,1.));
+      float lon = atan(d.x, -d.z);
+      vec4 real = texture2D(uTex, vec2(0.5 + lon/(2.*PI), 0.5 + lat/PI));
+      if(uNadirFill > 0.0){
+        float L = uNadirFill, feather = 0.14;
+        float t = 1.0 - smoothstep(-L, -L + feather, lat); // 1 deep in hole, 0 above the fill edge
+        if(t > 0.0){
+          float fLon = (uNadirSolid==1) ? 0.0 : lon;         // solid = single colour, smear = keep longitude
+          vec4 fill = texture2D(uTex, vec2(0.5 + fLon/(2.*PI), 0.5 - L/PI));
+          return mix(real, fill, t);
+        }
+      }
+      return real;
     }`;
 
   const FRAG = `precision highp float;
@@ -313,7 +326,7 @@
     uImgAspect:gl.getUniformLocation(p,'uImgAspect'),
     uSwap:gl.getUniformLocation(p,'uSwap'), uBackRot:gl.getUniformLocation(p,'uBackRot'),
     uViewMode:gl.getUniformLocation(p,'uViewMode'), uPlanetScale:gl.getUniformLocation(p,'uPlanetScale'),
-    uNadirFill:gl.getUniformLocation(p,'uNadirFill')
+    uNadirFill:gl.getUniformLocation(p,'uNadirFill'), uNadirSolid:gl.getUniformLocation(p,'uNadirSolid')
   });
   const uv=U(prog), ue=U(progE);
 
@@ -330,7 +343,7 @@
   const state={ yaw:0,pitch:0,fov:75*Math.PI/180, mode:'none', proj:'auto', autoMode:0,
     fishHalf:(200*Math.PI/180)/2, swap:0, backRot:0, imgAspect:2, videoEl:null, imageEl:null,
     viewMode:0, planetScale:1.0, gallery:[], galleryIdx:-1,
-    playbackRate:1, newFrame:false, nadirFill:0,
+    playbackRate:1, newFrame:false, nadirFill:0, nadirSolid:1,
     dragging:false,lastX:0,lastY:0 };
   const RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
   const FOV_MIN=25*Math.PI/180, FOV_MAX=110*Math.PI/180;
@@ -370,6 +383,7 @@
     gl.uniform1i(uv.uViewMode,state.viewMode);
     gl.uniform1f(uv.uPlanetScale,state.planetScale);
     gl.uniform1f(uv.uNadirFill,state.nadirFill);
+    gl.uniform1i(uv.uNadirSolid,state.nadirSolid);
     drawFS(prog);
     updateFovTag();
     requestAnimationFrame(render);
@@ -508,12 +522,13 @@
   updateQCtl();
 
   /* Nadir fill (cover the black hole below the camera) */
-  const nadirChk=document.getElementById('nadir'), nadirC=document.getElementById('nadirC');
+  const nadirChk=document.getElementById('nadir'), nadirC=document.getElementById('nadirC'), nadirSolidChk=document.getElementById('nadirSolid');
   function updateNadir(){
     document.getElementById('nadirVal').textContent=nadirC.value+'°';
     state.nadirFill = nadirChk.checked ? ((90-(+nadirC.value))*Math.PI/180) : 0;
+    state.nadirSolid = nadirSolidChk.checked ? 1 : 0;
   }
-  nadirChk.onchange=updateNadir; nadirC.oninput=updateNadir; updateNadir();
+  nadirChk.onchange=updateNadir; nadirC.oninput=updateNadir; nadirSolidChk.onchange=updateNadir; updateNadir();
 
   /* ================= Saving ================= */
   document.getElementById('btnSaveView').onclick=async()=>{
@@ -549,6 +564,7 @@
     gl.uniform1f(ue.uFishHalf,state.fishHalf); gl.uniform1f(ue.uImgAspect,state.imgAspect);
     gl.uniform1i(ue.uSwap,state.swap); gl.uniform1f(ue.uBackRot,state.backRot);
     gl.uniform1f(ue.uNadirFill,state.nadirFill);
+    gl.uniform1i(ue.uNadirSolid,state.nadirSolid);
     drawFS(progE);
     const pix=new Uint8Array(EW*EH*4);
     gl.readPixels(0,0,EW,EH,gl.RGBA,gl.UNSIGNED_BYTE,pix);
