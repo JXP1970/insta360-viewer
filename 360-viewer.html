@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  360° Viewer v1.3.1
+  360° Viewer v1.4.0
   Standalone WebGL 360° photo/video viewer for Insta360 (equirectangular + dual-fisheye).
   Single self-contained HTML file. Runs fully offline — files never leave your machine.
   https://github.com/JXP1970/insta360-viewer  ·  MIT License
@@ -99,7 +99,7 @@
 <body>
 <div id="app">
   <header>
-    <span class="title">360° Viewer <small>v1.3.1 · Insta360 · equirect · Dual-Fisheye</small></span>
+    <span class="title">360° Viewer <small>v1.4.0 · Insta360 · equirect · Dual-Fisheye</small></span>
     <button id="btnImage">🖼️ Foto</button>
     <button id="btnVideo">🎬 Video</button>
     <button id="btnDemo">✨ Demo</button>
@@ -135,6 +135,10 @@
         <option value="image/webp">WebP</option>
       </select>
       <span id="qCtl">Qualität <input id="quality" type="range" min="50" max="100" value="92" step="1" style="width:80px"><span id="qVal">92</span></span>
+    </div>
+    <div class="ctl">
+      <label style="display:flex;align-items:center;gap:4px" title="Schwarzes Loch unter der Kamera überdecken"><input id="nadir" type="checkbox"> Nadir füllen</label>
+      <input id="nadirC" type="range" min="5" max="45" value="20" step="1" style="width:76px"><span id="nadirVal">20°</span>
     </div>
     <button id="btnSaveView" class="save" disabled>📸 Ansicht</button>
     <button id="btnSaveFull" class="save" disabled>🗺️ Volles 360°-Frame</button>
@@ -211,11 +215,13 @@
     uniform float uImgAspect;  // source width/height
     uniform int   uSwap;       // 1 = swap which half is front/back
     uniform float uBackRot;    // extra rotation of back lens (radians)
+    uniform float uNadirFill;  // >0: clamp latitude to -uNadirFill (smears last ring over the black nadir hole)
     const float PI = 3.14159265358979;
 
     vec2 equirectUV(vec3 d){
       float lon = atan(d.x, -d.z);
       float lat = asin(clamp(d.y,-1.,1.));
+      if(uNadirFill > 0.0) lat = max(lat, -uNadirFill);
       return vec2(0.5 + lon/(2.*PI), 0.5 + lat/PI);
     }
     vec2 fisheyeUV(vec3 d){
@@ -306,7 +312,8 @@
     uMode:gl.getUniformLocation(p,'uMode'), uFishHalf:gl.getUniformLocation(p,'uFishHalf'),
     uImgAspect:gl.getUniformLocation(p,'uImgAspect'),
     uSwap:gl.getUniformLocation(p,'uSwap'), uBackRot:gl.getUniformLocation(p,'uBackRot'),
-    uViewMode:gl.getUniformLocation(p,'uViewMode'), uPlanetScale:gl.getUniformLocation(p,'uPlanetScale')
+    uViewMode:gl.getUniformLocation(p,'uViewMode'), uPlanetScale:gl.getUniformLocation(p,'uPlanetScale'),
+    uNadirFill:gl.getUniformLocation(p,'uNadirFill')
   });
   const uv=U(prog), ue=U(progE);
 
@@ -323,7 +330,7 @@
   const state={ yaw:0,pitch:0,fov:75*Math.PI/180, mode:'none', proj:'auto', autoMode:0,
     fishHalf:(200*Math.PI/180)/2, swap:0, backRot:0, imgAspect:2, videoEl:null, imageEl:null,
     viewMode:0, planetScale:1.0, gallery:[], galleryIdx:-1,
-    playbackRate:1, newFrame:false,
+    playbackRate:1, newFrame:false, nadirFill:0,
     dragging:false,lastX:0,lastY:0 };
   const RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
   const FOV_MIN=25*Math.PI/180, FOV_MAX=110*Math.PI/180;
@@ -362,6 +369,7 @@
     gl.uniform1f(uv.uBackRot,state.backRot);
     gl.uniform1i(uv.uViewMode,state.viewMode);
     gl.uniform1f(uv.uPlanetScale,state.planetScale);
+    gl.uniform1f(uv.uNadirFill,state.nadirFill);
     drawFS(prog);
     updateFovTag();
     requestAnimationFrame(render);
@@ -499,6 +507,14 @@
   fmtSel.onchange=updateQCtl; qualSlider.oninput=()=>document.getElementById('qVal').textContent=qualSlider.value;
   updateQCtl();
 
+  /* Nadir fill (cover the black hole below the camera) */
+  const nadirChk=document.getElementById('nadir'), nadirC=document.getElementById('nadirC');
+  function updateNadir(){
+    document.getElementById('nadirVal').textContent=nadirC.value+'°';
+    state.nadirFill = nadirChk.checked ? ((90-(+nadirC.value))*Math.PI/180) : 0;
+  }
+  nadirChk.onchange=updateNadir; nadirC.oninput=updateNadir; updateNadir();
+
   /* ================= Saving ================= */
   document.getElementById('btnSaveView').onclick=async()=>{
     const b=await toBlobFmt(canvas); download(b,nameFor('ansicht')); toast('Ansicht gespeichert 📸 ('+exportExt().toUpperCase()+')',true);
@@ -532,6 +548,7 @@
     gl.uniform2f(ue.uOutRes,EW,EH); gl.uniform1i(ue.uTex,0); gl.uniform1i(ue.uMode,1);
     gl.uniform1f(ue.uFishHalf,state.fishHalf); gl.uniform1f(ue.uImgAspect,state.imgAspect);
     gl.uniform1i(ue.uSwap,state.swap); gl.uniform1f(ue.uBackRot,state.backRot);
+    gl.uniform1f(ue.uNadirFill,state.nadirFill);
     drawFS(progE);
     const pix=new Uint8Array(EW*EH*4);
     gl.readPixels(0,0,EW,EH,gl.RGBA,gl.UNSIGNED_BYTE,pix);

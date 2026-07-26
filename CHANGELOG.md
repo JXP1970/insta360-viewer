@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.4.0] - 2026-07-26
+
+### Hinzugefügt
+- **Nadir füllen**: überdeckt das schwarze Loch direkt unter der Kamera (toter Winkel/Stativ) durch radiales Ausdehnen des untersten sichtbaren Bildrings; Abdeckungsgrad einstellbar (5°–45°). Gilt auch für den Export.
+
 ## [1.3.1] - 2026-07-26
 
 ### Behoben
