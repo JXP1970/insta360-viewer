@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  360° Viewer v1.2.0
+  360° Viewer v1.3.0
   Standalone WebGL 360° photo/video viewer for Insta360 (equirectangular + dual-fisheye).
   Single self-contained HTML file. Runs fully offline — files never leave your machine.
   https://github.com/JXP1970/insta360-viewer  ·  MIT License
@@ -99,7 +99,7 @@
 <body>
 <div id="app">
   <header>
-    <span class="title">360° Viewer <small>v1.2.0 · Insta360 · equirect · Dual-Fisheye</small></span>
+    <span class="title">360° Viewer <small>v1.3.0 · Insta360 · equirect · Dual-Fisheye</small></span>
     <button id="btnImage">🖼️ Foto</button>
     <button id="btnVideo">🎬 Video</button>
     <button id="btnDemo">✨ Demo</button>
@@ -176,6 +176,16 @@
     <button id="btnNext" title="Einzelbild vor">⏭</button>
     <input id="seek" type="range" min="0" max="1000" value="0">
     <span class="time" id="time">0:00 / 0:00</span>
+    <span class="ctl" style="margin-left:4px">Tempo
+      <select id="speed">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="0.75">0.75×</option>
+        <option value="1" selected>1×</option>
+        <option value="1.5">1.5×</option>
+        <option value="2">2×</option>
+      </select>
+    </span>
   </div>
 </div>
 
@@ -313,7 +323,9 @@
   const state={ yaw:0,pitch:0,fov:75*Math.PI/180, mode:'none', proj:'auto', autoMode:0,
     fishHalf:(200*Math.PI/180)/2, swap:0, backRot:0, imgAspect:2, videoEl:null, imageEl:null,
     viewMode:0, planetScale:1.0, gallery:[], galleryIdx:-1,
+    playbackRate:1, newFrame:false,
     dragging:false,lastX:0,lastY:0 };
+  const RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
   const FOV_MIN=25*Math.PI/180, FOV_MAX=110*Math.PI/180;
 
   function effMode(){ return state.proj==='equirect'?0 : state.proj==='fisheye'?1 : state.autoMode; }
@@ -328,8 +340,12 @@
   function render(){
     resize();
     if(state.mode==='video'&&state.videoEl&&state.videoEl.readyState>=2){
-      gl.bindTexture(gl.TEXTURE_2D,tex);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,state.videoEl);
+      // Upload only when a new video frame is ready (rVFC) instead of every screen refresh — avoids stutter on large 360° videos
+      if(!RVFC || state.newFrame){
+        gl.bindTexture(gl.TEXTURE_2D,tex);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,state.videoEl);
+        state.newFrame=false;
+      }
     }
     gl.useProgram(prog);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
@@ -438,12 +454,16 @@
     v.addEventListener('loadedmetadata',()=>{
       state.mode='video'; state.videoEl=v; state.imageEl=null;
       state.imgAspect=v.videoWidth/v.videoHeight;
+      v.playbackRate=state.playbackRate;                 // apply chosen speed
       document.getElementById('videobar').classList.add('show');
       // detect projection from first frame once available
       v.addEventListener('loadeddata',()=>detectProjection(v,v.videoWidth,v.videoHeight),{once:true});
       afterLoad('Video geladen · '+v.videoWidth+'×'+v.videoHeight);
     });
+    // fire on each newly decoded frame → texture is only re-uploaded when there is actually a new frame
+    if(RVFC){ const onFrame=()=>{ if(state.videoEl!==v) return; state.newFrame=true; v.requestVideoFrameCallback(onFrame); }; v.requestVideoFrameCallback(onFrame); }
     v.addEventListener('timeupdate',updateTime);
+    ['loadeddata','seeked'].forEach(ev=>v.addEventListener(ev,()=>{state.newFrame=true;})); // ensure upload after seek/step even when paused
     v.addEventListener('play',()=>document.getElementById('btnPlay').textContent='⏸');
     v.addEventListener('pause',()=>document.getElementById('btnPlay').textContent='▶');
     v.addEventListener('error',()=>toast('Video-Codec nicht abspielbar (evtl. H.265/HEVC). In Insta Studio als H.264-MP4 exportieren.',false,'warn'));
@@ -457,6 +477,7 @@
   document.getElementById('btnNext').onclick=()=>stepFrame(1);
   function stepFrame(d){const v=state.videoEl;if(!v)return;v.pause();v.currentTime=Math.max(0,Math.min(v.duration||0,v.currentTime+d*(1/30)));}
   seek.addEventListener('input',()=>{const v=state.videoEl;if(!v||!v.duration)return;v.currentTime=(seek.value/1000)*v.duration;});
+  document.getElementById('speed').addEventListener('change',e=>{state.playbackRate=+e.target.value; if(state.videoEl) state.videoEl.playbackRate=state.playbackRate; toast('Wiedergabe-Tempo '+state.playbackRate+'×');});
   function updateTime(){const v=state.videoEl;if(!v)return;if(!seek.matches(':active')&&v.duration)seek.value=Math.round(v.currentTime/v.duration*1000);document.getElementById('time').textContent=fmt(v.currentTime)+' / '+fmt(v.duration||0);}
   function fmt(s){s=Math.max(0,s||0);const m=Math.floor(s/60),ss=Math.floor(s%60);return m+':'+String(ss).padStart(2,'0');}
 

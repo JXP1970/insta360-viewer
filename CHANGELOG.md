@@ -4,6 +4,14 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.3.0] - 2026-07-26
+
+### Hinzugefügt
+- **Wiedergabe-Tempo** für Videos (0.25×–2×) — behebt „läuft zu schnell"
+
+### Behoben
+- **Ruckeln bei großen 360°-Videos**: Videobild wird nur noch bei tatsächlich neuen Frames auf die GPU geladen (`requestVideoFrameCallback`) statt bei jedem Bildschirm-Refresh
+
 ## [1.2.0] - 2026-07-26
 
 ### Hinzugefügt
