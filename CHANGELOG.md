@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.2.0] - 2026-07-26
+
+### Hinzugefügt
+- **Wählbares Export-Format**: JPG / PNG / WebP mit Qualitätsregler (für JPG/WebP) — gilt für Ansicht, volles 360°-Frame und Serien-Export
+
 ## [1.1.0] - 2026-07-26
 
 ### Hinzugefügt
