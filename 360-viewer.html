@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  360° Viewer v1.3.0
+  360° Viewer v1.3.1
   Standalone WebGL 360° photo/video viewer for Insta360 (equirectangular + dual-fisheye).
   Single self-contained HTML file. Runs fully offline — files never leave your machine.
   https://github.com/JXP1970/insta360-viewer  ·  MIT License
@@ -99,7 +99,7 @@
 <body>
 <div id="app">
   <header>
-    <span class="title">360° Viewer <small>v1.3.0 · Insta360 · equirect · Dual-Fisheye</small></span>
+    <span class="title">360° Viewer <small>v1.3.1 · Insta360 · equirect · Dual-Fisheye</small></span>
     <button id="btnImage">🖼️ Foto</button>
     <button id="btnVideo">🎬 Video</button>
     <button id="btnDemo">✨ Demo</button>
@@ -411,15 +411,20 @@
 
   /* ================= Media loading ================= */
   function detectProjection(imgOrCanvas,w,h){
-    // sample the 4 corners; dark corners => dual-fisheye (circles leave black corners)
+    // Dual-fisheye (side-by-side) has: dark outer corners AND dark top/bottom-CENTER (between the two circles),
+    // but bright circle centers at 1/4 and 3/4 width. Equirect has a bright top-center (sky) -> reliably excluded.
     try{
-      const s=64, c=document.createElement('canvas'); c.width=s; c.height=Math.round(s*h/w);
-      const x=c.getContext('2d'); x.drawImage(imgOrCanvas,0,0,c.width,c.height);
-      const d=x.getImageData(0,0,c.width,c.height).data;
-      const lum=(px,py)=>{const i=(py*c.width+px)*4;return (d[i]+d[i+1]+d[i+2])/3;};
-      const corners=(lum(1,1)+lum(c.width-2,1)+lum(1,c.height-2)+lum(c.width-2,c.height-2))/4;
-      const mid=lum(c.width>>1,c.height>>1);
-      state.autoMode=(corners<14 && mid>corners+20)?1:0;
+      const cw=64, ch=Math.max(16,Math.round(cw*h/w));
+      const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+      const x=c.getContext('2d'); x.drawImage(imgOrCanvas,0,0,cw,ch);
+      const d=x.getImageData(0,0,cw,ch).data;
+      const L=(fx,fy)=>{const px=Math.min(cw-1,Math.max(0,Math.round(fx*(cw-1)))),py=Math.min(ch-1,Math.max(0,Math.round(fy*(ch-1))));const i=(py*cw+px)*4;return (d[i]+d[i+1]+d[i+2])/3;};
+      const corners=(L(0.01,0.02)+L(0.99,0.02)+L(0.01,0.98)+L(0.99,0.98))/4;
+      const topMid=L(0.5,0.03), q1=L(0.25,0.5), q3=L(0.75,0.5);
+      const overall=(q1+q3+topMid+L(0.5,0.97)+corners)/5;
+      // require a non-black frame (avoids misdetecting a dark fade-in frame) and the full two-circle signature
+      const fisheye = overall>25 && corners<35 && topMid<35 && q1>corners+35 && q3>corners+35;
+      state.autoMode = fisheye ? 1 : 0;
     }catch(e){ state.autoMode=0; }
   }
 

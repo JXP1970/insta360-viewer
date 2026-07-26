@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.3.1] - 2026-07-26
+
+### Behoben
+- **Falsche Projektions-Erkennung**: equirectangular Videos/Fotos wurden manchmal als Dual-Fisheye erkannt (schwarzer Keil / Schlieren beim Drehen). Die Auto-Erkennung prüft jetzt zusätzlich die Bildmitte oben (Himmel) und ignoriert dunkle Anfangs-Frames. Manuell umschaltbar bleibt über „Projektion → Equirectangular".
+
 ## [1.3.0] - 2026-07-26
 
 ### Hinzugefügt
