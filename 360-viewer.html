@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  360° Viewer v1.4.1
+  360° Viewer v1.5.0
   Standalone WebGL 360° photo/video viewer for Insta360 (equirectangular + dual-fisheye).
   Single self-contained HTML file. Runs fully offline — files never leave your machine.
   https://github.com/JXP1970/insta360-viewer  ·  MIT License
@@ -99,7 +99,7 @@
 <body>
 <div id="app">
   <header>
-    <span class="title">360° Viewer <small>v1.4.1 · Insta360 · equirect · Dual-Fisheye</small></span>
+    <span class="title">360° Viewer <small>v1.5.0 · Insta360 · equirect · Dual-Fisheye</small></span>
     <button id="btnImage">🖼️ Foto</button>
     <button id="btnVideo">🎬 Video</button>
     <button id="btnDemo">✨ Demo</button>
@@ -236,21 +236,22 @@
       float cx = left ? 0.25 : 0.75;
       return vec2(cx + disc.x / uImgAspect, 0.5 + disc.y);
     }
+    vec4 sampleRaw(vec3 d){
+      return (uMode==1) ? texture2D(uTex, fisheyeUV(d)) : texture2D(uTex, equirectUV(d));
+    }
+    vec3 dirOf(float lon, float lat){          // inverse of equirectUV
+      return vec3(sin(lon)*cos(lat), sin(lat), -cos(lon)*cos(lat));
+    }
     vec4 sample360(vec3 d){
-      if(uMode==1) return texture2D(uTex, fisheyeUV(d));
+      vec4 real = sampleRaw(d);
+      if(uNadirFill <= 0.0) return real;
       float lat = asin(clamp(d.y,-1.,1.));
+      float L = uNadirFill, feather = 0.14;
+      float t = 1.0 - smoothstep(-L, -L + feather, lat); // 1 deep in hole, 0 above the fill edge
+      if(t <= 0.0) return real;
       float lon = atan(d.x, -d.z);
-      vec4 real = texture2D(uTex, vec2(0.5 + lon/(2.*PI), 0.5 + lat/PI));
-      if(uNadirFill > 0.0){
-        float L = uNadirFill, feather = 0.14;
-        float t = 1.0 - smoothstep(-L, -L + feather, lat); // 1 deep in hole, 0 above the fill edge
-        if(t > 0.0){
-          float fLon = (uNadirSolid==1) ? 0.0 : lon;         // solid = single colour, smear = keep longitude
-          vec4 fill = texture2D(uTex, vec2(0.5 + fLon/(2.*PI), 0.5 - L/PI));
-          return mix(real, fill, t);
-        }
-      }
-      return real;
+      float fLon = (uNadirSolid==1) ? 0.0 : lon;           // solid = single colour, smear = keep longitude
+      return mix(real, sampleRaw(dirOf(fLon, -L)), t);     // same fill for equirect and stitched fisheye
     }`;
 
   const FRAG = `precision highp float;
@@ -275,7 +276,8 @@
         float phi=2.0*atan(R);                 // 0 at center (down) .. PI at sky
         float psi=atan(p.y,p.x)+uYaw;           // azimuth + spin
         float down=(uViewMode==2)?-1.0:1.0;     // mode 2 flips to look up (tunnel)
-        dir=vec3(sin(phi)*cos(psi), -down*cos(phi), sin(phi)*sin(psi));
+        // z carries the same sign as the view axis, otherwise the planet comes out mirrored
+        dir=vec3(sin(phi)*cos(psi), -down*cos(phi), -down*sin(phi)*sin(psi));
       }
       gl_FragColor=sample360(dir);
     }`;
@@ -339,11 +341,25 @@
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([20,24,33,255]));
 
+  // Cameras out-shoot GPUs: an X4 photo is 11904 px wide, plenty of GPUs stop at 8192.
+  // Uploading anything larger fails silently and renders black, so shrink to fit first.
+  const MAX_TEX = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  let fitCanvas=null;
+  function fitToGpu(el,w,h){
+    if(Math.max(w,h)<=MAX_TEX) return el;
+    const s=MAX_TEX/Math.max(w,h);
+    const cw=Math.max(1,Math.round(w*s)), ch=Math.max(1,Math.round(h*s));
+    if(!fitCanvas) fitCanvas=document.createElement('canvas');
+    if(fitCanvas.width!==cw||fitCanvas.height!==ch){ fitCanvas.width=cw; fitCanvas.height=ch; }
+    fitCanvas.getContext('2d').drawImage(el,0,0,cw,ch);
+    return fitCanvas;
+  }
+
   /* ================= State ================= */
   const state={ yaw:0,pitch:0,fov:75*Math.PI/180, mode:'none', proj:'auto', autoMode:0,
     fishHalf:(200*Math.PI/180)/2, swap:0, backRot:0, imgAspect:2, videoEl:null, imageEl:null,
     viewMode:0, planetScale:1.0, gallery:[], galleryIdx:-1,
-    playbackRate:1, newFrame:false, nadirFill:0, nadirSolid:1,
+    playbackRate:1, newFrame:false, nadirFill:0, nadirSolid:1, projHint:null,
     dragging:false,lastX:0,lastY:0 };
   const RVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
   const FOV_MIN=25*Math.PI/180, FOV_MAX=110*Math.PI/180;
@@ -362,8 +378,9 @@
     if(state.mode==='video'&&state.videoEl&&state.videoEl.readyState>=2){
       // Upload only when a new video frame is ready (rVFC) instead of every screen refresh — avoids stutter on large 360° videos
       if(!RVFC || state.newFrame){
+        const v=state.videoEl;
         gl.bindTexture(gl.TEXTURE_2D,tex);
-        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,state.videoEl);
+        gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,fitToGpu(v,v.videoWidth,v.videoHeight));
         state.newFrame=false;
       }
     }
@@ -432,7 +449,22 @@
   function tdist(e){const a=e.touches[0],b=e.touches[1];return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);}
 
   /* ================= Media loading ================= */
+  // In-camera stitched panoramas carry GPano XMP ("ProjectionType: equirectangular").
+  // That is a statement of fact — far better than guessing from pixel brightness below.
+  async function xmpProjectionHint(src){
+    try{
+      let buf;
+      if(src instanceof Blob) buf=await src.slice(0,262144).arrayBuffer();
+      else { const r=await fetch(src,{headers:{Range:'bytes=0-262143'}}); if(!r.ok) return null; buf=await r.arrayBuffer(); }
+      const head=new TextDecoder('latin1').decode(new Uint8Array(buf,0,Math.min(buf.byteLength,262144)));
+      if(/GPano:ProjectionType[^>]*>\s*equirectangular/i.test(head)
+      || /GPano:ProjectionType\s*=\s*["']equirectangular/i.test(head)) return 'equirect';
+    }catch(e){}
+    return null;
+  }
+
   function detectProjection(imgOrCanvas,w,h){
+    if(state.projHint==='equirect'){ state.autoMode=0; return; } // metadata beats the heuristic
     // Dual-fisheye (side-by-side) has: dark outer corners AND dark top/bottom-CENTER (between the two circles),
     // but bright circle centers at 1/4 and 3/4 width. Equirect has a bright top-center (sky) -> reliably excluded.
     try{
@@ -455,7 +487,8 @@
     document.getElementById('btnSaveView').disabled=false;
     document.getElementById('btnSaveFull').disabled=false;
     document.getElementById('btnSeries').disabled = state.mode!=='video';
-    if(state.proj==='auto') toast(msg+' · erkannt: '+(effMode()===1?'Dual-Fisheye':'Equirectangular'));
+    if(state.proj==='auto') toast(msg+' · erkannt: '+(effMode()===1?'Dual-Fisheye'
+      :'Equirectangular'+(state.projHint==='equirect'?' (laut GPano-Metadaten)':'')));
     else toast(msg);
   }
 
@@ -465,10 +498,12 @@
       cleanupVideo(); state.mode='image'; state.imageEl=img;
       state.imgAspect=img.naturalWidth/img.naturalHeight;
       detectProjection(img,img.naturalWidth,img.naturalHeight);
+      const upload=fitToGpu(img,img.naturalWidth,img.naturalHeight);
       gl.bindTexture(gl.TEXTURE_2D,tex);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,upload);
       document.getElementById('videobar').classList.remove('show');
-      afterLoad('Foto geladen · '+img.naturalWidth+'×'+img.naturalHeight);
+      afterLoad('Foto geladen · '+img.naturalWidth+'×'+img.naturalHeight
+        + (upload!==img ? ' · Anzeige auf '+upload.width+' px verkleinert (GPU-Limit '+MAX_TEX+')' : ''));
     };
     img.onerror=()=>toast('Bild konnte nicht geladen werden',false,'warn');
     img.src=src;
@@ -544,7 +579,10 @@
   function renderEquirectToCanvas(EW){
     EW=EW-(EW%2); const EH=EW/2;
     gl.bindTexture(gl.TEXTURE_2D,tex);
-    if(state.mode==='video') gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,state.videoEl);
+    if(state.mode==='video'){
+      const v=state.videoEl;
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,fitToGpu(v,v.videoWidth,v.videoHeight));
+    }
     const outTex=gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D,outTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
@@ -560,7 +598,7 @@
     gl.useProgram(progE);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex);
     gl.viewport(0,0,EW,EH);
-    gl.uniform2f(ue.uOutRes,EW,EH); gl.uniform1i(ue.uTex,0); gl.uniform1i(ue.uMode,1);
+    gl.uniform2f(ue.uOutRes,EW,EH); gl.uniform1i(ue.uTex,0); gl.uniform1i(ue.uMode,effMode());
     gl.uniform1f(ue.uFishHalf,state.fishHalf); gl.uniform1f(ue.uImgAspect,state.imgAspect);
     gl.uniform1i(ue.uSwap,state.swap); gl.uniform1f(ue.uBackRot,state.backRot);
     gl.uniform1f(ue.uNadirFill,state.nadirFill);
@@ -588,6 +626,9 @@
     const w = state.mode==='video'?state.videoEl.videoWidth:state.imageEl.naturalWidth;
     const h = state.mode==='video'?state.videoEl.videoHeight:state.imageEl.naturalHeight;
     if(!srcEl) return null;
+    // Nadir fill lives in the shader, so an equirect source has to go through it too —
+    // the plain copy below would hand back the untouched frame, hole and all.
+    if(state.nadirFill>0) return renderEquirectToCanvas(Math.min(maxW, Math.max(1024, w||2048)));
     let W=w,H=h; if(maxW && w>maxW){ W=maxW; H=Math.round(h*maxW/w); }
     const c=document.createElement('canvas'); c.width=W; c.height=H;
     c.getContext('2d').drawImage(srcEl,0,0,W,H);
@@ -711,8 +752,9 @@
   }
   document.getElementById('btnGallery').onclick=()=>galleryEl.classList.toggle('show');
   document.getElementById('btnFull').onclick=()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();else document.exitFullscreen&&document.exitFullscreen();};
-  document.getElementById('btnDemo').onclick=()=>{state.proj='auto';document.getElementById('proj').value='auto';loadImageSource(makeDemoEqui());};
+  document.getElementById('btnDemo').onclick=()=>{state.projHint=null;state.proj='auto';document.getElementById('proj').value='auto';loadImageSource(makeDemoEqui());};
   document.getElementById('btnDemoFish').onclick=()=>{
+    state.projHint=null;
     state.proj='fisheye';document.getElementById('proj').value='fisheye';
     setFishParams(194,0,0); // demo was generated at 194°, no swap/rotation
     loadImageSource(makeDemoFisheye());
@@ -730,15 +772,20 @@
   // Insta360 X4 starting preset — fine-tune with the FOV / rotate / swap controls
   document.getElementById('btnX4').onclick=()=>{ setFishParams(200,0,0); state.proj='fisheye'; document.getElementById('proj').value='fisheye'; toast('X4-Preset gesetzt · bei Bedarf FOV/drehen/tauschen justieren'); };
 
-  function openFile(file,kindHint){
+  async function openFile(file,kindHint){
     const name=(file.name||'').toLowerCase();
     const isVid = file.type.startsWith('video') || name.endsWith('.insv') || kindHint==='video';
     const isImg = file.type.startsWith('image') || name.endsWith('.insp') || kindHint==='image';
-    if(name.endsWith('.insp')){ const b=new Blob([file],{type:'image/jpeg'}); loadImageSource(URL.createObjectURL(b)); if(state.proj==='auto'){} return; }
+    state.projHint=null;
     if(name.endsWith('.insv')){ const b=new Blob([file],{type:'video/mp4'}); loadVideoSource(URL.createObjectURL(b)); return; }
-    if(isVid) loadVideoSource(URL.createObjectURL(file));
-    else if(isImg) loadImageSource(URL.createObjectURL(file));
-    else toast('Dateityp nicht unterstützt',false,'warn');
+    if(isVid && !name.endsWith('.insp')){ loadVideoSource(URL.createObjectURL(file)); return; }
+    if(isImg){
+      state.projHint=await xmpProjectionHint(file);   // read GPano before the image loads
+      const b=name.endsWith('.insp') ? new Blob([file],{type:'image/jpeg'}) : file;
+      loadImageSource(URL.createObjectURL(b));
+      return;
+    }
+    toast('Dateityp nicht unterstützt',false,'warn');
   }
 
   /* drag & drop */
@@ -821,7 +868,7 @@
     const src=q.get('src'); if(!src) return;
     const p=q.get('proj'); if(p){ state.proj=p; const sel=document.getElementById('proj'); if(sel) sel.value=p; }
     if(/\.(insv|mp4|mov|webm)$/i.test(src)) loadVideoSource(src);
-    else loadImageSource(src);
+    else xmpProjectionHint(src).then(h=>{ state.projHint=h; loadImageSource(src); });
   })();
 })();
 </script>

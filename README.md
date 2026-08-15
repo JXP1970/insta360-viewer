@@ -11,7 +11,7 @@ Ein **eigenständiger 360°-Betrachter** für Insta360-Aufnahmen (X4 & Co.) — 
 - 🖼️ **360°-Fotos** anzeigen — equirectangular **und** rohes Dual-Fisheye (`.insp`)
 - 🎬 **360°-Videos** abspielen (mit Play/Pause, Zeitleiste, Einzelbild-Schritt)
 - 🧭 **Frei umsehen** per Maus/Touch, zoomen per Scrollen/Pinch
-- 🔎 **Auto-Erkennung**: equirectangular vs. Dual-Fisheye
+- 🔎 **Auto-Erkennung**: equirectangular vs. Dual-Fisheye — liest GPano-Metadaten, wenn vorhanden
 - 📸 **Einzelbilder exportieren**:
   - *Ansicht* — der aktuelle Blick als flaches PNG
   - *Volles 360°-Frame* — komplettes Panorama; bei Dual-Fisheye wird zu **equirectangular gestitcht**
@@ -36,6 +36,7 @@ Ein **eigenständiger 360°-Betrachter** für Insta360-Aufnahmen (X4 & Co.) — 
 | `←` / `→` | Video einzelbildweise |
 | `S` | Aktuelle Ansicht speichern |
 | `F` | Vollbild |
+| `P` | Little-Planet-Ansicht |
 
 ## Dateiformate
 
@@ -49,6 +50,7 @@ Ein **eigenständiger 360°-Betrachter** für Insta360-Aufnahmen (X4 & Co.) — 
 ## Hinweise
 
 - Die exakte Fisheye-Geometrie der X4 ist **nicht** fest einkalibriert; die Naht wird über **FOV / hinten drehen / tauschen** von Hand justiert (Startwert: X4-Preset).
+- Sehr große Quellen (ein X4-Foto ist 11904 px breit) werden für die Anzeige auf das Textur-Limit der GPU verkleinert — sonst bliebe das Bild schwarz. Der Export ohne Nadir-Füllung greift weiterhin aufs Original zu.
 - Rein clientseitig (WebGL). Keine Daten gehen nach außen.
 
 ## Technik

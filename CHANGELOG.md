@@ -4,6 +4,16 @@ Alle nennenswerten Änderungen an diesem Projekt.
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 Versionierung nach [SemVer](https://semver.org/lang/de/).
 
+## [1.5.0] - 2026-08-15
+
+### Behoben
+- **Nadir füllen wirkte nicht im Export**: „Volles 360°-Frame" und der Serien-Export lieferten das Loch ungefüllt aus — bei equirect wurde die Quelle direkt kopiert, bei Dual-Fisheye brach das Sampling ab, bevor der Nadir-Schritt drankam. Beide Exportwege laufen jetzt durch denselben Shader wie die Anzeige.
+- **Little Planet war gespiegelt**: die stereografische Ansicht bildete die Längenrichtung verkehrt herum ab (Schrift lief seitenverkehrt). Vorzeichen der z-Achse korrigiert, für die Tunnel-Variante sinngemäß mit.
+- **Schwarzes Bild bei sehr großen Aufnahmen**: Quellen jenseits von `MAX_TEXTURE_SIZE` — ein X4-Foto ist 11904 px breit, viele GPUs können nur 8192 — wurden stumm schwarz gerendert. Sie werden für die Anzeige jetzt passend verkleinert, mit Hinweis in der Statusmeldung.
+
+### Geändert
+- **Projektions-Erkennung liest Metadaten**: Trägt eine Datei GPano-XMP (`ProjectionType: equirectangular` — so schreibt es die X4 in jedes in der Kamera gestitchte Foto), wird das ausgewertet statt geraten. Die Helligkeits-Heuristik greift nur noch ohne Metadaten.
+
 ## [1.4.1] - 2026-07-26
 
 ### Geändert
